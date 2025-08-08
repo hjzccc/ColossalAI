@@ -24,6 +24,8 @@ from ._utils import (
 )
 from .base import PipelineSchedule
 
+import torch.distributed as dist
+
 
 class OneForwardOneBackwardSchedule(PipelineSchedule):
     def __init__(
@@ -163,6 +165,16 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             output_object (Any): Object to be sent.
             next_rank (int, optional): The rank of the recipient of the tensor.
         """
+        # if not self.stage_manager.is_last_stage():
+        #   # ADD THIS: Print activations before sending
+        #   print(f"\nStage {self.stage_manager.stage} sending activations:")
+        #   if isinstance(output_tensor, dict):
+        #       for k, v in output_tensor.items():
+        #           if isinstance(v, torch.Tensor):
+        #               print(f"  {k}: shape={v.shape}, mean={v.mean().item():.6f}")
+        #   elif isinstance(output_tensor, torch.Tensor):
+        #       print(f"  shape={output_tensor.shape}, mean={output_tensor.mean().item():.6f}")
+
         if not self.stage_manager.is_last_stage():
             if self.fp8_communication:
                 cast_to_fp8_pipeline(output_tensor)
@@ -197,6 +209,13 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             next_rank (int, optional): The rank of the recipient of the tensor.
         """
         if not self.stage_manager.is_last_stage():
+            # print(f"\nStage {self.stage_manager.stage} sending activations:")
+            # if isinstance(output_tensor, dict):
+            #     for k, v in output_tensor.items():
+            #         if isinstance(v, torch.Tensor):
+            #             print(f"  {k}: shape={v.shape}, mean={v.mean().item():.6f}")
+            # elif isinstance(output_tensor, torch.Tensor):
+            #     print(f"  shape={output_tensor.shape}, mean={output_tensor.mean().item():.6f}")
             if not self.send_tensor_metadata and self.grad_metadata_recv is not None:
                 send_first = None
             if self.fp8_communication:
@@ -214,6 +233,14 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
                 cast_from_fp8_pipeline(output_tensor, del_metadata=False)
                 cast_from_fp8_pipeline(output_tensor_grad)
 
+            # # ADD THIS: Print received gradients
+            # print(f"\nStage {self.stage_manager.stage} received gradients:")
+            # if isinstance(output_tensor_grad, dict):
+            #     for k, v in output_tensor_grad.items():
+            #         if isinstance(v, torch.Tensor):
+            #             print(f"  {k}: shape={v.shape}, mean={v.mean().item():.6f}")
+            # elif isinstance(output_tensor_grad, torch.Tensor):
+            #     print(f"  shape={output_tensor_grad.shape}, mean={output_tensor_grad.mean().item():.6f}")
             return output_tensor_grad
 
     def send_backward_recv_forward(self, input_tensor_grad: Any, send_first: Optional[bool] = None) -> Any:
@@ -368,14 +395,22 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         """
         Runs non-interleaved 1F1B schedule, with communication between pipeline stages.
         """
+
+        print(f"\n[{dist.get_rank()}]=========================================")
+        import time
+
         assert not self.forward_only
 
         self.load_batch(data_iter)
 
         # num_warmup_microbatches is the step when not all the processes are working
+        print(self.stage_manager.num_stages, self.stage_manager.stage)
         num_warmup_microbatches = self.stage_manager.num_stages - self.stage_manager.stage - 1
+        print(num_warmup_microbatches, self.stage_manager.stage)
         num_warmup_microbatches = min(num_warmup_microbatches, self.num_microbatches)
+        print(num_warmup_microbatches, self.stage_manager.stage)
         num_microbatches_remaining = self.num_microbatches - num_warmup_microbatches
+        print(num_microbatches_remaining, self.stage_manager.stage)
 
         # Input, output tensors only need to be saved when doing backward passes
         input_objs, output_objs = [], []
@@ -388,8 +423,18 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         # Run warmup forward passes.
         for i in range(num_warmup_microbatches):
             input_obj = self.recv_forward()
+
+            print_obj(input_obj, f"warmup_{i}", self.recv_forward)
+
             output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
+
+            print_itr(f"warmup_{i}", self.forward_step)
+            time.sleep(1)
+
             self.send_forward(output_obj)
+
+            print_obj(output_obj, f"warmup_{i}", self.send_forward)
+
             input_objs.append(input_obj)
             output_objs.append(output_obj)
 
@@ -398,13 +443,23 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         # receive this tensor here.
         if num_microbatches_remaining > 0:
             input_obj = self.recv_forward()
+            
+            print_obj(input_obj, "warmup_fin", self.recv_forward)            
 
         # Run 1F1B in steady state.
         for i in range(num_microbatches_remaining):
             last_iteration = i == (num_microbatches_remaining - 1)
 
             output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
+
+            print_itr(f"steady_{i}", self.forward_step)
+            time.sleep(1)
+
             output_obj_grad = self.send_forward_recv_backward(output_obj, send_first=self.stage_manager.stage % 2 == 0)
+            
+            print_obj(output_obj, f"steady_{i}", self.send_forward_recv_backward)
+            print_obj(output_obj_grad, f"steady_{i}", self.send_forward_recv_backward, "(grad)")
+
             # Add input_obj and output_obj to end of list.
             input_objs.append(input_obj)
             output_objs.append(output_obj)
@@ -415,12 +470,21 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             output_obj = output_objs.pop(0)
             input_obj_grad = self.backward_step(optimizer, input_obj, output_obj, output_obj_grad)
 
+            print_itr(f"steady_{i}", self.backward_step)
+            time.sleep(1)
+
             if last_iteration:
                 self.send_backward(input_obj_grad)
+
+                print_obj(input_obj_grad, f"steady_{i}", self.send_backward)
+    
             else:
                 input_obj = self.send_backward_recv_forward(
                     input_obj_grad, send_first=self.stage_manager.stage % 2 == 0
                 )
+
+                print_obj(input_obj_grad, f"steady_{i}", self.send_backward_recv_forward, "(grad)")
+                print_obj(input_obj, f"steady_{i}", self.send_backward_recv_forward)
 
         # Run cooldown backward passes.
         for i in range(num_warmup_microbatches):
@@ -428,8 +492,17 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             output_obj = output_objs.pop(0)
 
             output_obj_grad = self.recv_backward()
+            
+            print_obj(output_obj_grad, f"cooldown_{i}", self.recv_backward, "(grad)")
+            
             input_obj_grad = self.backward_step(optimizer, input_obj, output_obj, output_obj_grad)
+
+            print_itr(f"cooldown_{i}", self.backward_step)
+            time.sleep(1)
+
             self.send_backward(input_obj_grad)
+
+            print_obj(input_obj_grad, f"cooldown_{i}", self.send_backward, "(grad)")
 
         assert all(len(v) == 0 for v in input_objs) and all(len(v) == 0 for v in output_objs)
 
@@ -438,6 +511,10 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
                 model = model.unwrap()
             batch_size_dim = getattr(model, "batch_size_dim", 0)
             outputs = merge_batch(outputs, batch_size_dim)
+
+
+        print(f"[{dist.get_rank()}]----------------------------------")
+
         return {"loss": accum_loss, "outputs": outputs}
 
     def forward_backward_step(
@@ -472,3 +549,16 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             result = self.run_forward_backward(model, data_iter, criterion, optimizer, return_loss, return_outputs)
 
         return result
+
+def print_itr(microbatch, func):
+    print(f"\t[COMP] Device [{dist.get_rank()}] Microbatch [{microbatch}] Operation [{func.__name__}]")
+
+def print_obj(obj, microbatch, func, suffix=""):
+    if type(obj) == dict:
+        for k, v in obj.items():
+            print(f"\t[COMM] Device [{dist.get_rank()}] Microbatch [{microbatch}] Operation [{func.__name__}] \n\t\t{k}: shape={v.shape}, dtype={v.dtype}, mean={v.mean().item():.6f} {suffix}", flush=True)
+    elif type(obj) == torch.Tensor:
+        k, v = "send tensor", obj
+        print(f"\t[COMM] Device [{dist.get_rank()}] Microbatch [{microbatch}] Operation [{func.__name__}] \n\t\t{k}: shape={v.shape}, dtype={v.dtype}, mean={v.mean().item():.6f} {suffix}", flush=True)
+    else:
+        print(f"\t[COMM] Device [{dist.get_rank()}] Microbatch [{microbatch}] Operation [{func.__name__}] \n\t\t is type={type(obj)} {suffix}", flush=True)

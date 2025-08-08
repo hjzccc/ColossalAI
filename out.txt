@@ -1,0 +1,324 @@
+[08/08/25 19:36:05] INFO     colossalai - colossalai - INFO:                    
+                             /workspace/ColossalAI/colossalai/initialize.py:75  
+                             launch                                             
+                    INFO     colossalai - colossalai - INFO: Distributed        
+                             environment is initialized, world size: 2          
+Model params: 3.07 B
+[extension] Loading the JIT-built cpu_adam_x86 kernel during runtime now
+[extension] Time taken to load cpu_adam_x86 op: 0.018217802047729492 seconds
+[extension] Loading the JIT-built fused_optim_cuda kernel during runtime now
+[extension] Loading the JIT-built cpu_adam_x86 kernel during runtime now
+[extension] Time taken to load fused_optim_cuda op: 0.05341625213623047 seconds
+[extension] Time taken to load cpu_adam_x86 op: 0.10401439666748047 seconds
+[extension] Loading the JIT-built fused_optim_cuda kernel during runtime now
+[extension] Time taken to load fused_optim_cuda op: 0.055129289627075195 seconds
+                    WARNING  colossalai - colossalai - WARNING:                 
+                             /workspace/ColossalAI/colossalai/booster/plugin/hyb
+                             rid_parallel_plugin.py:1355 configure              
+                    WARNING  colossalai - colossalai - WARNING: Use Zero        
+                             Optimizer when data parallel size is 1 may         
+                             introduce unnecessary overhead. If you do not      
+                             intend to use cpu_offload, please consider set     
+                             zero_stage=0.                                      
+Booster init max device memory: 9468.73 MB
+Booster init max CPU memory: 725.59 MB
+
+[0]=========================================
+2 0
+1 0
+1 0
+3 0
+	[COMM] Device [0] Microbatch [warmup_0] Operation [recv_forward] 
+		 is type=<class 'NoneType'> 
+                    WARNING  colossalai - colossalai.shardformer.modeling.llama 
+                             - WARNING: `use_cache=True` is incompatible with   
+                             pipeline parallelism. Setting `use_cache=False`... 
+
+[1]=========================================
+2 1
+0 1
+0 1
+4 1
+	[COMP] Device [0] Microbatch [warmup_0] Operation [forward_step]
+	[COMM] Device [0] Microbatch [warmup_0] Operation [send_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.001724 
+	[COMM] Device [0] Microbatch [warmup_fin] Operation [recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMM] Device [1] Microbatch [warmup_fin] Operation [recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.001724 
+[08/08/25 19:36:07] WARNING  colossalai - colossalai.shardformer.modeling.llama 
+                             - WARNING: `use_cache=True` is incompatible with   
+                             pipeline parallelism. Setting `use_cache=False`... 
+	[COMP] Device [0] Microbatch [steady_0] Operation [forward_step]
+	[COMP] Device [1] Microbatch [steady_0] Operation [forward_step]
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.734375 
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMP] Device [1] Microbatch [steady_0] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.011963 
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.011963 
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMP] Device [1] Microbatch [steady_1] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_0] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.765625 
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMP] Device [1] Microbatch [steady_1] Operation [backward_step]
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [0] Microbatch [steady_1] Operation [forward_step]
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)	[COMM] Device [0] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.042725 
+
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.042725 
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+	[COMP] Device [1] Microbatch [steady_2] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_1] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.750000 
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [1] Microbatch [steady_2] Operation [backward_step]
+	[COMP] Device [0] Microbatch [steady_2] Operation [forward_step]
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.003433 
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.003433 
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMP] Device [1] Microbatch [steady_3] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_2] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.750000 
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_backward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [1] Microbatch [steady_3] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 
+	[COMM] Device [0] Microbatch [cooldown_0] Operation [recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+[1]----------------------------------
+	[COMP] Device [0] Microbatch [cooldown_0] Operation [backward_step]
+Step 0 loss: 11.0
+	[COMM] Device [0] Microbatch [cooldown_0] Operation [send_backward] 
+		 is type=<class 'NoneType'> (grad)
+[0]----------------------------------
+
+[1]=========================================
+2 1
+0 1
+0 1
+4 1
+
+[0]=========================================
+2 0
+1 0
+1 0
+3 0
+	[COMM] Device [0] Microbatch [warmup_0] Operation [recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [0] Microbatch [warmup_0] Operation [forward_step]
+	[COMM] Device [0] Microbatch [warmup_0] Operation [send_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.034668 
+	[COMM] Device [0] Microbatch [warmup_fin] Operation [recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMM] Device [1] Microbatch [warmup_fin] Operation [recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.034668 
+	[COMP] Device [0] Microbatch [steady_0] Operation [forward_step]
+	[COMP] Device [1] Microbatch [steady_0] Operation [forward_step]
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.750000 
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMP] Device [1] Microbatch [steady_0] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.027222 
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.027222 
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMP] Device [1] Microbatch [steady_1] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_0] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.750000 
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [0] Microbatch [steady_1] Operation [forward_step]
+	[COMP] Device [1] Microbatch [steady_1] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)	[COMM] Device [0] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.046631 
+
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.046631 
+	[COMP] Device [1] Microbatch [steady_2] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_1] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.734375 
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [0] Microbatch [steady_2] Operation [forward_step]
+	[COMP] Device [1] Microbatch [steady_2] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.031738 
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.031738 
+	[COMP] Device [1] Microbatch [steady_3] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_2] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.734375 
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_backward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [1] Microbatch [steady_3] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 
+	[COMM] Device [0] Microbatch [cooldown_0] Operation [recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+[1]----------------------------------
+Step 1 loss: 10.96875
+	[COMP] Device [0] Microbatch [cooldown_0] Operation [backward_step]
+	[COMM] Device [0] Microbatch [cooldown_0] Operation [send_backward] 
+		 is type=<class 'NoneType'> (grad)
+[0]----------------------------------
+
+[0]=========================================
+
+[1]=========================================
+2 0
+1 0
+1 0
+3 0
+	[COMM] Device [0] Microbatch [warmup_0] Operation [recv_forward] 
+		 is type=<class 'NoneType'> 
+2 1
+0 1
+0 1
+4 1
+	[COMP] Device [0] Microbatch [warmup_0] Operation [forward_step]
+	[COMM] Device [0] Microbatch [warmup_0] Operation [send_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.017456 
+	[COMM] Device [0] Microbatch [warmup_fin] Operation [recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMM] Device [1] Microbatch [warmup_fin] Operation [recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.017456 
+	[COMP] Device [0] Microbatch [steady_0] Operation [forward_step]
+	[COMP] Device [1] Microbatch [steady_0] Operation [forward_step]
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.734375 
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMP] Device [1] Microbatch [steady_0] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.026489 
+	[COMM] Device [1] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.026489 
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.000000 (grad)
+	[COMP] Device [1] Microbatch [steady_1] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_0] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.734375 
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_0] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [0] Microbatch [steady_1] Operation [forward_step]
+	[COMP] Device [1] Microbatch [steady_1] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)	[COMM] Device [0] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.043701 
+
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+	[COMM] Device [1] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.043701 
+	[COMP] Device [1] Microbatch [steady_2] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_1] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.734375 
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_1] Operation [send_backward_recv_forward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [0] Microbatch [steady_2] Operation [forward_step]
+	[COMP] Device [1] Microbatch [steady_2] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.036865 
+	[COMM] Device [1] Microbatch [steady_2] Operation [send_backward_recv_forward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=0.036865 
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_forward_recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+	[COMP] Device [1] Microbatch [steady_3] Operation [forward_step]
+	[COMP] Device [0] Microbatch [steady_2] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_forward_recv_backward] 
+		send tensor: shape=torch.Size([]), dtype=torch.bfloat16, mean=2.734375 
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_forward_recv_backward] 
+		 is type=<class 'NoneType'> (grad)
+	[COMM] Device [0] Microbatch [steady_2] Operation [send_backward] 
+		 is type=<class 'NoneType'> 
+	[COMP] Device [1] Microbatch [steady_3] Operation [backward_step]
+	[COMM] Device [1] Microbatch [steady_3] Operation [send_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 
+	[COMM] Device [0] Microbatch [cooldown_0] Operation [recv_backward] 
+		hidden_states: shape=torch.Size([2, 512, 3072]), dtype=torch.bfloat16, mean=-0.000000 (grad)
+[1]----------------------------------
+Step 2 loss: 10.9375
+	[COMP] Device [0] Microbatch [cooldown_0] Operation [backward_step]
+	[COMM] Device [0] Microbatch [cooldown_0] Operation [send_backward] 
+		 is type=<class 'NoneType'> (grad)
+[0]----------------------------------
+num_samples: 8, dp_world_size: 1, flop_megatron: 124461709787135.98, flop: 107878941720576, avg_duration: 10.503060340881348, avg_throughput: 0.7616827610578053
+Throughput: 0.76 samples/sec, TFLOPS per GPU by Megatron: 5.93, TFLOPS per GPU: 5.14
+Max device memory usage: 32166.41 MB
+
+====== Training on All Nodes =====
+127.0.0.1: success
+
+====== Stopping All Nodes =====
+127.0.0.1: finish
