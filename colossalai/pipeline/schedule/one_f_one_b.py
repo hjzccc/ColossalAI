@@ -10,7 +10,7 @@ from colossalai.interface import ModelWrapper, OptimizerWrapper
 from colossalai.pipeline.p2p import PipelineP2PCommunication, create_send_metadata
 from colossalai.pipeline.stage_manager import PipelineStageManager
 from colossalai.quantization.fp8 import cast_from_fp8_pipeline, cast_to_fp8_pipeline
-from colossalai.utils import get_current_device
+from colossalai.utils import get_current_device, global_step_counter
 
 from ._utils import (
     detach,
@@ -397,6 +397,9 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         """
 
         print(f"\n[{dist.get_rank()}]=========================================")
+        print(f"\t ====== Step[{global_step_counter.get()}] ======")
+
+        assert dist.get_rank() == self.stage_manager.stage, "rank != stage ?"
         import time
 
         assert not self.forward_only
@@ -415,6 +418,21 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         # Input, output tensors only need to be saved when doing backward passes
         input_objs, output_objs = [], []
 
+        overriding_intermediates = True
+        logging_intermediate = False
+        # overriding_intermediates = False
+        # logging_intermediate = True
+
+        intermediate = []
+        
+        import os
+        f_checkpoint = f"checkpoint.step{global_step_counter.get()}.stage{self.stage_manager.stage}.pt"
+        if os.path.exists(f_checkpoint) and overriding_intermediates:
+            print("=====using intermediate tensors=====")
+            intermediate = torch.load(f_checkpoint)
+        else:
+            print("=====regular computation=====")
+
         accum_loss = None
         if return_loss and self.stage_manager.is_last_stage():
             accum_loss = torch.scalar_tensor(0, device=get_current_device())
@@ -422,18 +440,25 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
 
         # Run warmup forward passes.
         for i in range(num_warmup_microbatches):
-            input_obj = self.recv_forward()
 
-            print_obj(input_obj, f"warmup_{i}", self.recv_forward)
+            if not overriding_intermediates:
+                input_obj = self.recv_forward()  # original code
+
+                print_obj(input_obj, f"warmup_{i}", self.recv_forward)
+                if logging_intermediate:
+                    intermediate.append(input_obj)
+            else:
+                input_obj = intermediate.pop(0)
 
             output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
 
             print_itr(f"warmup_{i}", self.forward_step)
-            time.sleep(1)
+            # time.sleep(1)
 
-            self.send_forward(output_obj)
+            if not overriding_intermediates:
+                self.send_forward(output_obj)  # original code
 
-            print_obj(output_obj, f"warmup_{i}", self.send_forward)
+                print_obj(output_obj, f"warmup_{i}", self.send_forward)
 
             input_objs.append(input_obj)
             output_objs.append(output_obj)
@@ -442,9 +467,15 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         # If all microbatches are run in warmup / cooldown phase, then no need to
         # receive this tensor here.
         if num_microbatches_remaining > 0:
-            input_obj = self.recv_forward()
             
-            print_obj(input_obj, "warmup_fin", self.recv_forward)            
+            if not overriding_intermediates:
+                input_obj = self.recv_forward()
+                
+                print_obj(input_obj, "warmup_fin", self.recv_forward)      
+                if logging_intermediate:
+                    intermediate.append(input_obj)
+            else:
+                input_obj = intermediate.pop(0)    
 
         # Run 1F1B in steady state.
         for i in range(num_microbatches_remaining):
@@ -453,12 +484,17 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
 
             print_itr(f"steady_{i}", self.forward_step)
-            time.sleep(1)
+            # time.sleep(1)
 
-            output_obj_grad = self.send_forward_recv_backward(output_obj, send_first=self.stage_manager.stage % 2 == 0)
+            if not overriding_intermediates:
+                output_obj_grad = self.send_forward_recv_backward(output_obj, send_first=self.stage_manager.stage % 2 == 0)
             
-            print_obj(output_obj, f"steady_{i}", self.send_forward_recv_backward)
-            print_obj(output_obj_grad, f"steady_{i}", self.send_forward_recv_backward, "(grad)")
+                print_obj(output_obj, f"steady_{i}", self.send_forward_recv_backward)
+                print_obj(output_obj_grad, f"steady_{i}", self.send_forward_recv_backward, "(grad)")
+                if logging_intermediate:
+                    intermediate.append(output_obj_grad)
+            else:
+                output_obj_grad = intermediate.pop(0)
 
             # Add input_obj and output_obj to end of list.
             input_objs.append(input_obj)
@@ -471,38 +507,50 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             input_obj_grad = self.backward_step(optimizer, input_obj, output_obj, output_obj_grad)
 
             print_itr(f"steady_{i}", self.backward_step)
-            time.sleep(1)
+            # time.sleep(1)
 
             if last_iteration:
-                self.send_backward(input_obj_grad)
+                if not overriding_intermediates:
+                    self.send_backward(input_obj_grad)
 
-                print_obj(input_obj_grad, f"steady_{i}", self.send_backward)
+                    print_obj(input_obj_grad, f"steady_{i}", self.send_backward)
     
             else:
-                input_obj = self.send_backward_recv_forward(
-                    input_obj_grad, send_first=self.stage_manager.stage % 2 == 0
-                )
+                if not overriding_intermediates:
+                    input_obj = self.send_backward_recv_forward(
+                        input_obj_grad, send_first=self.stage_manager.stage % 2 == 0
+                    )
 
-                print_obj(input_obj_grad, f"steady_{i}", self.send_backward_recv_forward, "(grad)")
-                print_obj(input_obj, f"steady_{i}", self.send_backward_recv_forward)
+                    print_obj(input_obj_grad, f"steady_{i}", self.send_backward_recv_forward, "(grad)")
+                    print_obj(input_obj, f"steady_{i}", self.send_backward_recv_forward)
+                    if logging_intermediate:
+                        intermediate.append(input_obj)
+                else:
+                    input_obj = intermediate.pop(0)
 
         # Run cooldown backward passes.
         for i in range(num_warmup_microbatches):
             input_obj = input_objs.pop(0)
             output_obj = output_objs.pop(0)
 
-            output_obj_grad = self.recv_backward()
+            if not overriding_intermediates:
+                output_obj_grad = self.recv_backward()
             
-            print_obj(output_obj_grad, f"cooldown_{i}", self.recv_backward, "(grad)")
+                print_obj(output_obj_grad, f"cooldown_{i}", self.recv_backward, "(grad)")
+                if logging_intermediate:
+                    intermediate.append(output_obj_grad)
+            else:
+                output_obj_grad = intermediate.pop(0)
             
             input_obj_grad = self.backward_step(optimizer, input_obj, output_obj, output_obj_grad)
 
             print_itr(f"cooldown_{i}", self.backward_step)
-            time.sleep(1)
+            # time.sleep(1)
 
-            self.send_backward(input_obj_grad)
+            if not overriding_intermediates:
+                self.send_backward(input_obj_grad)
 
-            print_obj(input_obj_grad, f"cooldown_{i}", self.send_backward, "(grad)")
+                print_obj(input_obj_grad, f"cooldown_{i}", self.send_backward, "(grad)")
 
         assert all(len(v) == 0 for v in input_objs) and all(len(v) == 0 for v in output_objs)
 
@@ -514,6 +562,8 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
 
 
         print(f"[{dist.get_rank()}]----------------------------------")
+        if logging_intermediate:
+            torch.save(intermediate, f_checkpoint)
 
         return {"loss": accum_loss, "outputs": outputs}
 

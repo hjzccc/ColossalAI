@@ -13,6 +13,9 @@ from .multi_tensor_apply import multi_tensor_applier
 from .tensor_detector import TensorDetector
 from .timer import MultiTimer, Timer
 
+from .step_counter import StepCounter
+global_step_counter = StepCounter()
+
 __all__ = [
     "conditional_context",
     "Timer",
@@ -27,4 +30,5 @@ __all__ = [
     "get_current_device",
     "is_ddp_ignored",
     "get_non_persistent_buffers_set",
+    "global_step_counter",
 ]
