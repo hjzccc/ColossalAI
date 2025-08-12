@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 import torch
 from torch.nn import Module
 from torch.utils._pytree import tree_map
-
+import os
 from colossalai.accelerator import get_accelerator
 from colossalai.interface import ModelWrapper, OptimizerWrapper
 from colossalai.pipeline.p2p import PipelineP2PCommunication, create_send_metadata
@@ -425,11 +425,14 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
 
         intermediate = []
         
-        import os
         f_checkpoint = f"checkpoint.step{global_step_counter.get()}.stage{self.stage_manager.stage}.pt"
         if os.path.exists(f_checkpoint) and overriding_intermediates:
             print("=====using intermediate tensors=====")
-            intermediate = torch.load(f_checkpoint)
+            checkpoint_data = torch.load(f_checkpoint)
+            intermediate = checkpoint_data['intermediate']
+            # Restore RNG states
+            torch.set_rng_state(checkpoint_data['torch_rng_state'])
+            torch.cuda.set_rng_state(checkpoint_data['cuda_rng_state'])
         else:
             print("=====regular computation=====")
 
@@ -448,7 +451,7 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
                 if logging_intermediate:
                     intermediate.append(input_obj)
             else:
-                input_obj = intermediate.pop(0)
+                    input_obj = intermediate.pop(0)
 
             output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
 
@@ -475,7 +478,7 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
                 if logging_intermediate:
                     intermediate.append(input_obj)
             else:
-                input_obj = intermediate.pop(0)    
+                    input_obj = intermediate.pop(0)    
 
         # Run 1F1B in steady state.
         for i in range(num_microbatches_remaining):
@@ -563,8 +566,15 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
 
         print(f"[{dist.get_rank()}]----------------------------------")
         if logging_intermediate:
-            torch.save(intermediate, f_checkpoint)
-
+            # Save both intermediate tensors and RNG states
+            checkpoint_data = {
+                'intermediate': intermediate,
+                'torch_rng_state': torch.get_rng_state(),
+                'cuda_rng_state': torch.cuda.get_rng_state()
+            }
+            torch.save(checkpoint_data, f_checkpoint)
+            
+        global_step_counter.increment()
         return {"loss": accum_loss, "outputs": outputs}
 
     def forward_backward_step(
