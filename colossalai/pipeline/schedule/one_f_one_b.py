@@ -26,7 +26,6 @@ from .base import PipelineSchedule
 
 import torch.distributed as dist
 
-
 class OneForwardOneBackwardSchedule(PipelineSchedule):
     def __init__(
         self,
@@ -65,6 +64,221 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         self.grad_metadata_recv = None
 
         self.fp8_communication = fp8_communication
+    def _merge_tensors(self, tensor_list):
+        """Merge list of tensors/dicts along batch dimension."""
+        if not tensor_list or tensor_list[0] is None:
+            return None
+        if isinstance(tensor_list[0], dict):
+            merged = {}
+            for key in tensor_list[0].keys():
+                if isinstance(tensor_list[0][key], torch.Tensor):
+                    merged[key] = torch.cat([t[key] for t in tensor_list], dim=0)
+                else:
+                    merged[key] = tensor_list[0][key]
+            return merged
+        elif isinstance(tensor_list[0], torch.Tensor):
+            return torch.cat(tensor_list, dim=0)
+        return tensor_list[0]
+    def _run_exact_merged_recovery(
+        self,
+        model: Module,
+        criterion: Callable[..., Any],
+        optimizer: OptimizerWrapper,
+        checkpoint_data: dict,
+        num_warmup_microbatches: int,
+        num_microbatches_remaining: int,
+        return_loss: bool,
+        return_outputs: bool,
+    ) -> Dict:
+        """Run EXACT recovery with merged batches using saved microbatches."""
+        print(f"\n[{dist.get_rank()}] ===== EXACT MERGED RECOVERY =====")
+        print(f"  Stage: {self.stage_manager.stage}")
+        print(f"  Warmup: {num_warmup_microbatches}, Steady: {num_microbatches_remaining}")
+        # Monitor memory
+        initial_mem = torch.cuda.memory_allocated() / 1e9
+        total_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"  Initial memory: {initial_mem:.2f}GB / {total_mem:.2f}GB")
+
+        accum_loss = None
+        if return_loss and self.stage_manager.is_last_stage():
+            accum_loss = torch.scalar_tensor(0, device=get_current_device())
+        outputs = [] if return_outputs and self.stage_manager.is_last_stage() else None
+
+        # Load saved data
+        intermediate = checkpoint_data['intermediate']
+        saved_micro_batches = checkpoint_data['micro_batches']
+
+        print(f"  Loaded {len(saved_micro_batches)} microbatches")
+        print(f"  Loaded {len(intermediate)} intermediate tensors")
+
+        # Parse intermediate list based on EXACT order from run_forward_backward
+        idx = 0
+
+        # 1. Warmup forward inputs
+        warmup_inputs = []
+        for i in range(num_warmup_microbatches):
+            if idx < len(intermediate):
+                warmup_inputs.append(intermediate[idx])
+                idx += 1
+
+        # 2. Steady state first input (if exists)
+        steady_first_input = None
+        if num_microbatches_remaining > 0 and idx < len(intermediate):
+            steady_first_input = intermediate[idx]
+            idx += 1
+
+        # 3. Steady state: INTERLEAVED gradients and inputs
+        steady_grads = []
+        steady_remaining_inputs = []
+
+        for i in range(num_microbatches_remaining):
+            # First comes the gradient
+            if idx < len(intermediate):
+                steady_grads.append(intermediate[idx])
+                idx += 1
+
+            # Then comes the input (except for last iteration)
+            if i < num_microbatches_remaining - 1:  # Not last iteration
+                if idx < len(intermediate):
+                    steady_remaining_inputs.append(intermediate[idx])
+                    idx += 1
+
+        # 4. Cooldown gradients
+        cooldown_grads = []
+        for i in range(num_warmup_microbatches):
+            if idx < len(intermediate):
+                cooldown_grads.append(intermediate[idx])
+                idx += 1
+
+        print(f"  Parsed: {len(warmup_inputs)} warmup inputs, "
+                f"{1 if steady_first_input else 0} steady first, "
+                f"{len(steady_grads)} steady grads, "
+                f"{len(steady_remaining_inputs)} steady remaining inputs, "
+                f"{len(cooldown_grads)} cooldown grads")
+        print(f"  Total parsed: {idx}, Remaining: {len(intermediate) - idx}")
+
+        # Build ordered list of ALL input activations for forward pass
+        all_input_activations = []
+
+        # Add warmup inputs
+        all_input_activations.extend(warmup_inputs)
+
+        # Add steady state inputs in correct order
+        if num_microbatches_remaining > 0:
+            all_input_activations.append(steady_first_input)
+            all_input_activations.extend(steady_remaining_inputs)
+
+        # Build ordered list of ALL gradients for backward pass
+        all_gradients = steady_grads + cooldown_grads
+
+        print(f"  Total: {len(all_input_activations)} input activations, {len(all_gradients)} gradients")
+        print(f"  Expected: {self.num_microbatches} activations, {self.num_microbatches} gradients")
+
+        # Merge tensors for batch processing
+        merged_micro_batch = self._merge_tensors(saved_micro_batches)
+        merged_input = self._merge_tensors(all_input_activations) if not self.stage_manager.is_first_stage() else None
+        merged_grad = self._merge_tensors(all_gradients) if all_gradients else None
+
+        # Debug shapes
+        if merged_micro_batch:
+            if isinstance(merged_micro_batch, dict):
+                for k, v in merged_micro_batch.items():
+                    if isinstance(v, torch.Tensor):
+                        print(f"  Merged batch '{k}': shape={v.shape}")
+                        break
+            elif isinstance(merged_micro_batch, torch.Tensor):
+                print(f"  Merged batch: shape={merged_micro_batch.shape}")
+
+        if merged_input:
+            if isinstance(merged_input, dict):
+                for k, v in merged_input.items():
+                    if isinstance(v, torch.Tensor):
+                        print(f"  Merged input '{k}': shape={v.shape}")
+                        break
+            elif isinstance(merged_input, torch.Tensor):
+                print(f"  Merged input: shape={merged_input.shape}")
+
+        if merged_grad:
+            if isinstance(merged_grad, dict):
+                for k, v in merged_grad.items():
+                    if isinstance(v, torch.Tensor):
+                        print(f"  Merged grad '{k}': shape={v.shape}")
+                        break
+            elif isinstance(merged_grad, torch.Tensor):
+                print(f"  Merged grad: shape={merged_grad.shape}")
+
+        # FORWARD PASS
+        print(f"\n[{dist.get_rank()}] Running merged forward pass...")
+        mem_before_fwd = torch.cuda.memory_allocated() / 1e9
+
+        output_obj = model_forward(model, merged_micro_batch, merged_input)
+
+        mem_after_fwd = torch.cuda.memory_allocated() / 1e9
+        print(f"  Forward memory: {mem_before_fwd:.2f}GB -> {mem_after_fwd:.2f}GB")
+
+        # BACKWARD PASS
+        print(f"\n[{dist.get_rank()}] Running merged backward pass...")
+        mem_before_bwd = torch.cuda.memory_allocated() / 1e9
+
+        if merged_input is not None:
+            tree_map(retain_grad, merged_input)
+
+        # optimizer.zero_grad()
+
+        if self.stage_manager.is_last_stage():
+            loss = criterion(output_obj, merged_micro_batch)
+            optimizer.backward(loss)
+            if accum_loss is not None:
+                accum_loss.add_(loss.data)
+        else:
+            if merged_grad is not None:
+                if isinstance(output_obj, dict) and isinstance(merged_grad, dict):
+                    keys = output_obj.get("backward_tensor_keys",
+                                        [k for k in output_obj.keys() if k in merged_grad])
+                    tensors_to_backward = []
+                    grads_to_backward = []
+                    for k in keys:
+                        if k in output_obj and k in merged_grad:
+                            tensors_to_backward.append(output_obj[k])
+                            grads_to_backward.append(merged_grad[k])
+
+                    if len(tensors_to_backward) == 1:
+                        optimizer.backward_by_grad(tensors_to_backward[0], grads_to_backward[0])
+                    elif len(tensors_to_backward) > 0:
+                        optimizer.backward_by_grad(tensors_to_backward, grads_to_backward)
+                elif isinstance(output_obj, torch.Tensor) and isinstance(merged_grad, torch.Tensor):
+                    optimizer.backward_by_grad(output_obj, merged_grad)
+
+        mem_after_bwd = torch.cuda.memory_allocated() / 1e9
+        peak_mem = torch.cuda.max_memory_allocated() / 1e9
+        print(f"  Backward memory: {mem_before_bwd:.2f}GB -> {mem_after_bwd:.2f}GB")
+        print(f"  Peak memory: {peak_mem:.2f}GB / {total_mem:.2f}GB ({peak_mem/total_mem*100:.1f}%)")
+
+        # Handle outputs if needed
+        if outputs is not None:
+            if isinstance(output_obj, dict):
+                batch_size = next(v.shape[0] for v in output_obj.values() if isinstance(v, torch.Tensor))
+            else:
+                batch_size = output_obj.shape[0] if isinstance(output_obj, torch.Tensor) else self.num_microbatches
+
+            mb_size = batch_size // self.num_microbatches
+            for i in range(self.num_microbatches):
+                if isinstance(output_obj, dict):
+                    mb_output = {k: v[i*mb_size:(i+1)*mb_size] if isinstance(v, torch.Tensor) else v
+                                for k, v in output_obj.items()}
+                else:
+                    mb_output = output_obj[i*mb_size:(i+1)*mb_size] if isinstance(output_obj, torch.Tensor) else output_obj
+                outputs.append(tree_map_hf(detach, mb_output))
+
+            if isinstance(model, ModelWrapper):
+                model = model.unwrap()
+            batch_size_dim = getattr(model, "batch_size_dim", 0)
+            outputs = merge_batch(outputs, batch_size_dim)
+
+        print(f"[{dist.get_rank()}] Exact merged recovery completed!\n")
+        global_step_counter.increment()
+        return {"loss": accum_loss, "outputs": outputs}
+
 
     def load_batch(self, data_iter: Iterable, device: Optional[torch.device] = None) -> None:
         """Load a batch from data iterator.
@@ -278,6 +492,7 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         criterion: Callable,
         accum_loss: Optional[torch.Tensor] = None,
         outputs: Optional[List[Any]] = None,
+        return_micro_batch: bool = False,  # Add this parameter
     ) -> Union[torch.Tensor, dict]:
         """Forward one step of the pipeline
 
@@ -302,9 +517,9 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
                 accum_loss.add_(loss.data)
             if outputs is not None:
                 outputs.append(tree_map_hf(detach, output_obj))
-            return loss
+            return (loss, micro_batch) if return_micro_batch else loss
         else:
-            return output_obj
+            return (output_obj, micro_batch) if return_micro_batch else output_obj
 
     def backward_step(
         self,
@@ -405,7 +620,6 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         assert not self.forward_only
 
         self.load_batch(data_iter)
-
         # num_warmup_microbatches is the step when not all the processes are working
         print(self.stage_manager.num_stages, self.stage_manager.stage)
         num_warmup_microbatches = self.stage_manager.num_stages - self.stage_manager.stage - 1
@@ -418,22 +632,45 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         # Input, output tensors only need to be saved when doing backward passes
         input_objs, output_objs = [], []
 
-        overriding_intermediates = True
+        overriding_intermediates = False
         logging_intermediate = False
-        # overriding_intermediates = False
-        # logging_intermediate = True
 
         intermediate = []
+        saved_micro_batches = []
         
         f_checkpoint = f"checkpoint.step{global_step_counter.get()}.stage{self.stage_manager.stage}.pt"
-        if os.path.exists(f_checkpoint) and overriding_intermediates:
+        if os.path.exists(f_checkpoint):
             print("=====using intermediate tensors=====")
+            overriding_intermediates = True
             checkpoint_data = torch.load(f_checkpoint)
             intermediate = checkpoint_data['intermediate']
             # Restore RNG states
             torch.set_rng_state(checkpoint_data['torch_rng_state'])
             torch.cuda.set_rng_state(checkpoint_data['cuda_rng_state'])
+            # Check if we have saved microbatches for exact recovery
+            if 'micro_batches' in checkpoint_data:
+                print(f"=====Found {len(checkpoint_data['micro_batches'])} saved microbatches - EXACT recovery possible=====")
+                use_merged_recovery = True  # Set to False for sequential recovery
+
+                if use_merged_recovery:
+                    try:
+                        return self._run_exact_merged_recovery(
+                            model, criterion, optimizer, checkpoint_data,
+                            num_warmup_microbatches, num_microbatches_remaining,
+                            return_loss, return_outputs
+                        )
+                    except RuntimeError as e:
+                        if "out of memory" in str(e):
+                            print(f"ERROR: Out of memory with merged recovery! Falling back to  sequential.")
+                            torch.cuda.empty_cache()
+                            # Fall through to sequential recovery
+                        else:
+                            raise e
+            else:
+                print("WARNING: No saved microbatches in checkpoint - cannot do exact recovery")
+                print("Falling back to sequential recovery with new data (results may differ!)")
         else:
+            logging_intermediate = True
             print("=====regular computation=====")
 
         accum_loss = None
@@ -453,7 +690,12 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             else:
                     input_obj = intermediate.pop(0)
 
-            output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
+            if logging_intermediate:
+                (output_obj, micro_batch) = self.forward_step(model, input_obj, criterion, accum_loss, outputs, return_micro_batch=True)
+                if micro_batch is not None:
+                    saved_micro_batches.append(micro_batch)
+            else:
+                output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
 
             print_itr(f"warmup_{i}", self.forward_step)
             # time.sleep(1)
@@ -483,8 +725,12 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
         # Run 1F1B in steady state.
         for i in range(num_microbatches_remaining):
             last_iteration = i == (num_microbatches_remaining - 1)
-
-            output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
+            if logging_intermediate:
+                (output_obj, micro_batch) = self.forward_step(model, input_obj, criterion, accum_loss, outputs, return_micro_batch=True)
+                if micro_batch is not None:
+                    saved_micro_batches.append(micro_batch)
+            else:
+                output_obj = self.forward_step(model, input_obj, criterion, accum_loss, outputs)
 
             print_itr(f"steady_{i}", self.forward_step)
             # time.sleep(1)
@@ -569,10 +815,12 @@ class OneForwardOneBackwardSchedule(PipelineSchedule):
             # Save both intermediate tensors and RNG states
             checkpoint_data = {
                 'intermediate': intermediate,
+                "micro_batches": saved_micro_batches,
                 'torch_rng_state': torch.get_rng_state(),
                 'cuda_rng_state': torch.cuda.get_rng_state()
             }
             torch.save(checkpoint_data, f_checkpoint)
+            print(f"  Saved {len(saved_micro_batches)} microbatches to checkpoint")
             
         global_step_counter.increment()
         return {"loss": accum_loss, "outputs": outputs}

@@ -1,9 +1,11 @@
 import argparse
+import random
 import resource
 import time
 import warnings
 from contextlib import nullcontext
 
+import numpy as np
 import torch
 import torch.distributed as dist
 from data_utils import RandomDataset
@@ -124,10 +126,33 @@ def main():
         choices=["all_to_all", "ring_attn", "ring", "split_gather"],
         help="Sequence parallelism mode",
     )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     args = parser.parse_args()
 
     colossalai.launch_from_torch()
     coordinator = DistCoordinator()
+    
+    # Set seeds for reproducibility
+    def set_seeds(seed: int):
+        """Set all seeds for reproducibility."""
+        # Each rank gets a different but deterministic seed
+        actual_seed = seed
+        random.seed(actual_seed)
+        np.random.seed(actual_seed)
+        torch.manual_seed(actual_seed)
+        torch.cuda.manual_seed(actual_seed)
+        torch.cuda.manual_seed_all(actual_seed)
+        get_accelerator().manual_seed(actual_seed)
+        
+        # Set deterministic algorithms for CUDA operations
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        
+        # Enable deterministic algorithms in PyTorch (may impact performance)
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    
+    # Set seeds based on rank for reproducibility across ranks
+    set_seeds(args.seed)
 
     def empty_init():
         pass
@@ -295,12 +320,19 @@ def main():
         config = MODEL_CONFIGS[args.config]
     else:
         config = AutoConfig.from_pretrained(args.config, trust_remote_code=True)
-    get_accelerator().manual_seed(42)
 
     dataset = RandomDataset(
         num_samples=args.batch_size * args.num_steps * dp_size, max_length=args.max_length, vocab_size=config.vocab_size
     )
-    dataloader = plugin.prepare_dataloader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True, seed=42)
+    # Use fixed seed for dataloader and disable shuffling for perfect reproducibility
+    # Or use shuffle with a fixed seed that accounts for rank
+    dataloader = plugin.prepare_dataloader(
+        dataset, 
+        batch_size=args.batch_size, 
+        shuffle=False,  # Disable shuffling for perfect reproducibility
+        drop_last=True, 
+        seed=args.seed + coordinator.rank  # Each rank gets different but deterministic data
+    )
 
     # ==============================
     # Initialize Model and Optimizer

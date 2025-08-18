@@ -72,7 +72,7 @@ def prepare_dataloader(
     _kwargs = kwargs.copy()
     process_group = process_group or _get_default_group()
     sampler = StatefulDistributedSampler(
-        dataset, num_replicas=process_group.size(), rank=process_group.rank(), shuffle=shuffle
+        dataset, num_replicas=process_group.size(), rank=process_group.rank(), shuffle=shuffle, seed=seed
     )
 
     # Deterministic dataloader
